@@ -1,4 +1,4 @@
-# TurboPLY
+# TurboPLY [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 <img width="300" height="300" alt="turboply" src="https://github.com/user-attachments/assets/a0986559-5e4c-49bf-91e4-f44e8ef327df" /><img width="400" height="300" alt="image" src="https://github.com/user-attachments/assets/4b78aa0a-c02a-47ca-8a83-97f8336184e6" />
 
 
