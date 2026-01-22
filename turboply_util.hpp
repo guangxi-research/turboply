@@ -99,6 +99,9 @@ namespace turboply {
             ColumnView _column_view;
             ColumnData* _column_data;
         };
+
+        template <typename T, typename TargetType>
+        concept ByteCompatible = std::is_standard_layout_v<T> && std::is_trivial_v<T> && (sizeof(T) == sizeof(TargetType));
     }
 
 template <detail::fixed_string ElementName, typename T, detail::fixed_string... PropertyNames>
@@ -111,33 +114,33 @@ struct ScalarSpec
     using Base::property_names;
     using Base::Base;
 
-    ScalarSpec(std::vector<T>& column_data_) requires (property_num == 1)
-        : Base(reinterpret_cast<typename Base::ColumnData&>(column_data_)) {}
+    ScalarSpec(std::vector<T>& column_data) requires (property_num == 1)
+        : Base(reinterpret_cast<typename Base::ColumnData&>(column_data)) {}
 
-    ScalarSpec(const std::vector<T>& column_data_) requires (property_num == 1)
-        : Base(reinterpret_cast<const typename Base::ColumnData&>(column_data_)) {}
+    ScalarSpec(const std::vector<T>& column_data) requires (property_num == 1)
+        : Base(reinterpret_cast<const typename Base::ColumnData&>(column_data)) {}
 
-    ScalarSpec(std::span<T> column_view_) requires (property_num == 1)
-        : Base(typename Base::ColumnView(reinterpret_cast<RowType*>(column_view_.data()), column_view_.size())) {}
+    ScalarSpec(std::span<T> column_view) requires (property_num == 1)
+        : Base(typename Base::ColumnView(reinterpret_cast<RowType*>(column_view.data()), column_view.size())) {}
 
-    ScalarSpec(std::span<const T> column_view_) requires (property_num == 1)
-        : Base(std::span<const RowType>(reinterpret_cast<const RowType*>(column_view_.data()), column_view_.size())) {}
+    ScalarSpec(std::span<const T> column_view) requires (property_num == 1)
+        : Base(std::span<const RowType>(reinterpret_cast<const RowType*>(column_view.data()), column_view.size())) {}
 
-    template <typename UserStruct>
-    ScalarSpec(std::vector<UserStruct>& column_data_) requires (sizeof(UserStruct) == sizeof(RowType))
-        : Base(reinterpret_cast<typename Base::ColumnData&>(column_data_)) {}
+    template <detail::ByteCompatible<RowType> UserT>
+    ScalarSpec(std::vector<UserT>& column_data)
+        : Base(reinterpret_cast<typename Base::ColumnData&>(column_data)) {}
 
-    template <typename UserStruct>
-    ScalarSpec(const std::vector<UserStruct>& column_data_) requires (sizeof(UserStruct) == sizeof(RowType))
-        : Base(reinterpret_cast<const typename Base::ColumnData&>(column_data_)) {}
+    template <detail::ByteCompatible<RowType> UserT>
+    ScalarSpec(const std::vector<UserT>& column_data)
+        : Base(reinterpret_cast<const typename Base::ColumnData&>(column_data)) {}
 
-    template <typename UserStruct>
-    ScalarSpec(std::span<UserStruct> column_view_) requires (sizeof(UserStruct) == sizeof(RowType))
-        : Base(typename Base::ColumnView(reinterpret_cast<RowType*>(column_view_.data()), column_view_.size())) {}
+    template <detail::ByteCompatible<RowType> UserT>
+    ScalarSpec(std::span<UserT> column_view)
+        : Base(typename Base::ColumnView(reinterpret_cast<RowType*>(column_view.data()), column_view.size())) {}
 
-    template <typename UserStruct>
-    ScalarSpec(std::span<const UserStruct> column_view_) requires (sizeof(UserStruct) == sizeof(RowType))
-        : Base(std::span<const RowType>(reinterpret_cast<const RowType*>(column_view_.data()), column_view_.size())) {}
+    template <detail::ByteCompatible<RowType> UserT>
+    ScalarSpec(std::span<const UserT> column_view)
+        : Base(std::span<const RowType>(reinterpret_cast<const RowType*>(column_view.data()), column_view.size())) {}
 };
 
 template <detail::fixed_string ElementName, typename T, detail::fixed_string PropertyName, typename ListType = uint8_t, std::size_t Length = 0>
