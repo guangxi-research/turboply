@@ -263,10 +263,12 @@ struct Point {
 
 PlyFileReader reader("SampleData\\ascii.ply", true);
 reader.parseHeader();
+
 auto elem = reader.getElements()[0];
 assert(elem.name == "vertex");
 
 auto pts = new Point[elem.count];
+
 std::vector<Point> normals;
 normals.resize(elem.count);
 
@@ -275,7 +277,7 @@ using WeightSpec = ScalarSpec<"vertex", float, "weight">;
 
 VertexSpec v_spec{ std::span<Point>(pts, elem.count) }; // 预分配
 NormalSpec n_spec{ std::span(normals) }; // 预分配
-WeightSpec w_spec{ weight }; // 动态分配
+WeightSpec w_spec{ weight }; // 绑定后分配
 
 bind_reader(reader, n_spec, v_spec, w_spec);
 
