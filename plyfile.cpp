@@ -14,15 +14,13 @@ namespace {
 
     public:
         mapped_file_buf(const std::filesystem::path& filename, bool read_only, size_t reserve_size)
-            : filename_(filename), read_only_(read_only) {
+            : filename_{ filename }, read_only_{ read_only } {
 
             if (!read_only) {
-                if (!std::filesystem::exists(filename)) {
+                if (!std::filesystem::exists(filename))
                     std::ofstream touch(filename, std::ios::binary);
-                }
-                if (reserve_size > 0) {
+                if (reserve_size > 0)
                     std::filesystem::resize_file(filename, reserve_size);
-                }
             }
 
             fm_ = boost::interprocess::file_mapping(filename.generic_string().c_str()
@@ -37,7 +35,7 @@ namespace {
 
         virtual ~mapped_file_buf() {
             if (!read_only_) {
-                // Ω‚≥˝”≥…‰»ª∫ÛresizeŒ™ µº Œƒº˛¥Û–°
+                // Ëß£Èô§Êò†Â∞ÑÁÑ∂Âêéresize‰∏∫ÂÆûÈôÖÊñá‰ª∂Â§ßÂ∞è
                 region_ = boost::interprocess::mapped_region();
                 fm_ = boost::interprocess::file_mapping();
                 size_t final_len = pptr() - pbase();
@@ -76,13 +74,14 @@ namespace turboply {
 
 PlyFormat detectPlyFormat(const std::filesystem::path& filename) {
     std::ifstream ifs(filename);
-    constexpr std::streamsize N = 1024;
-    std::string header;
-    header.resize(N);
+    if (!ifs.is_open()) {
+        throw std::runtime_error(std::format("Ply Read Error: Cannot open file '{}' for format detection.", filename.string()));
+    }
 
+    constexpr std::streamsize N = 1024;
+    std::string header(N, '\0');
     ifs.read(header.data(), N);
-    std::streamsize readn = ifs.gcount();
-    header.resize(static_cast<size_t>(readn));
+    header.resize(static_cast<size_t>(ifs.gcount()));
 
     bool found_ascii = (header.find("format ascii") != std::string::npos);
     bool found_bin_le = (header.find("format binary_little_endian") != std::string::npos);
@@ -90,7 +89,7 @@ PlyFormat detectPlyFormat(const std::filesystem::path& filename) {
     if (found_ascii && !found_bin_le) return PlyFormat::ASCII;
     if (found_bin_le && !found_ascii) return PlyFormat::BINARY;
 
-    throw std::runtime_error("unsupported ply format");
+    throw std::runtime_error("Ply Read Error: Unsupported or unrecognized PLY format in header.");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -98,9 +97,9 @@ PlyFormat detectPlyFormat(const std::filesystem::path& filename) {
 template <class StreamHandler>
     requires std::same_as<StreamHandler, PlyStreamReader> || std::same_as<StreamHandler, PlyStreamWriter>
 PlyFileHandler<StreamHandler>::PlyFileHandler(Resources&& res, PlyFormat format)
-    : StreamHandler(*res.second, format)
-    , _mapped_buf(std::move(res.first))
-    , _managed_stream(std::move(res.second)) {
+    : StreamHandler{ *res.second, format }
+    , _mapped_buf{ std::move(res.first) }
+    , _managed_stream{ std::move(res.second) } {
 }
 
 template <class StreamHandler>
@@ -112,11 +111,14 @@ typename PlyFileHandler<StreamHandler>::Resources
 
     if (use_mapping) {
 #if TURBOPLY_ENABLE_FILE_MAPPING
-        // ’‚¿Ôµƒ 100MB ‘§∑÷≈‰∫Õ”≥…‰¬ﬂº≠±£≥÷≤ª±‰
-        res.first = std::make_unique<mapped_file_buf>(filename.c_str(), is_reader, reserve_size);
-        res.second = std::make_unique<StreamT>(res.first.get());
+        try {
+            res.first = std::make_unique<mapped_file_buf>(filename.c_str(), is_reader, reserve_size);
+            res.second = std::make_unique<StreamT>(res.first.get());
+        } catch (const std::exception& e) {
+            throw std::runtime_error(std::format("Ply Error: Failed to map file '{}': {}.", filename.string(), e.what()));
+        }
 #else
-        throw std::runtime_error("unsupported file mapping");
+        throw std::runtime_error("Ply Error: File mapping is disabled in this build (TURBOPLY_ENABLE_FILE_MAPPING is off).");
 #endif
     }
     else {
@@ -124,6 +126,9 @@ typename PlyFileHandler<StreamHandler>::Resources
             res.second = std::make_unique<std::ifstream>(filename, std::ios::binary);
         else
             res.second = std::make_unique<std::ofstream>(filename, std::ios::binary);
+
+        if (!res.second->good())
+            throw std::runtime_error(std::format("Ply Error: Failed to open file '{}'.", filename.string()));
     }
 
     return res;
