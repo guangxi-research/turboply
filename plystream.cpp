@@ -1,4 +1,5 @@
 #include "turboply.hpp"
+#include <cassert>
 #include <stdexcept>
 
 namespace turboply {
@@ -309,3 +310,4 @@ void PlyStreamWriter::writeLineEnd() {
 }
 
 }
+
