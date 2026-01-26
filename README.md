@@ -1,5 +1,6 @@
 # TurboPLY [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-<img width="300" height="300" alt="turboply" src="https://github.com/user-attachments/assets/a0986559-5e4c-49bf-91e4-f44e8ef327df" /><img width="400" height="300" alt="image" src="https://github.com/user-attachments/assets/4b78aa0a-c02a-47ca-8a83-97f8336184e6" />
+<img width="300" height="300" alt="turboply" src="https://github.com/user-attachments/assets/a0986559-5e4c-49bf-91e4-f44e8ef327df" /><img width="400" height="300" alt="image" src="https://github.com/user-attachments/assets/c63ca725-2552-4b4c-b1fc-5b862e67fd3c" />
+
 
 
 TurboPLY is a lightweight, high-performance C++ library for reading and writing PLY (Polygon File Format) files. It is designed for modern geometry pipelines where throughput, low memory overhead, and extensibility are critical. The library supports binary little-endian and ASCII formats, and provides optional memory-mapped file I/O for zero-copy, high-throughput access to large datasets. Big-endian format is intentionally not supported to keep the implementation simple and fast. Beyond performance, TurboPLY is engineered for extreme ease of use. It features an intuitive, declarative binding API that allows developers to map complex PLY properties to C++ containers with minimal code.
@@ -257,8 +258,6 @@ void save_gaussian_splat_ply(
 
 ```cpp
 
-using namespace turboply;
-
 struct MyVertex {
     float a;
     double b;
@@ -267,8 +266,9 @@ struct MyVertex {
 };
 
 using MyStruct = turboply::detail::RecordStruct<float, double, char, std::vector<int>>;
-using MySpec = detail::PropertySpec<"vertex", MyStruct, "a", "b", "c", "d">;
+using MySpec = turboply::detail::PropertySpec<"vertex", MyStruct, "a", "b", "c", "d">;
 
+using namespace turboply;
 {
     PlyFileWriter writer("test.ply", PlyFormat::ASCII);
 
