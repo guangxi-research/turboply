@@ -10,7 +10,7 @@
  *          access to large datasets. Big-endian format is intentionally 
  *          not supported for simplicity and performance.
  * 
- * @version 1.0.3
+ * @version 1.0.4
  * @date    2026-01-26
  *
  * -----------------------------------------------------------------------------
@@ -235,3 +235,4 @@ private:
 }
 
 #include "turboply_util.hpp"
+
