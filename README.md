@@ -135,7 +135,7 @@ TurboPLY is optimized for modern Deep Learning pipelines. The following example 
 By casting the Tensor's raw memory to `std::array` types, we maintain TurboPLY's high-performance declarative binding without unnecessary data duplication.
 
 ```cpp
-// 以下示例代码是骂了AI Gemini3Pro N次以后写出来的，最后这版看了一眼应该没有大问题，没有实际测试
+
 #include <torch/torch.h>
 #include "turboply.hpp"
 
