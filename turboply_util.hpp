@@ -315,44 +315,39 @@ using FaceSpec = ListSpec<"face", uint32_t, "vertex_indices", 3>;
 
     namespace detail {
 
-        template <typename A, typename B>
-        constexpr bool prop_specs_conflict() {
-            if constexpr (A::element_name != B::element_name) {
+        template <typename... Specs>
+        consteval bool check_property_conflicts() {
+            if constexpr (sizeof...(Specs) < 2) {
                 return false;
             }
             else {
-                constexpr auto check = []<size_t I, size_t J>() {
-                    using PropA = typename A::template ColumnInfo<I>;
-                    using PropB = typename B::template ColumnInfo<J>;
-                    return PropA::property_name == PropB::property_name;
+                constexpr auto has_conflict = []<typename A, typename B>() {
+                    if constexpr (A::element_name != B::element_name) {
+                        return false;
+                    }
+                    else {
+                        return[]<size_t... Is>(std::index_sequence<Is...>) {
+                            return (([]<size_t I>() {
+                                return[]<size_t... Js>(std::index_sequence<Js...>) {
+                                    using PropA = typename A::template ColumnInfo<I>;
+                                    return ((PropA::property_name == B::template ColumnInfo<Js>::property_name) || ...);
+                                }(std::make_index_sequence<B::property_num>{});
+                            }.template operator() < Is > ()) || ...); 
+                        }(std::make_index_sequence<A::property_num>{});
+                    }
                 };
 
-                return[]<size_t... Is>(std::index_sequence<Is...>) {
-                    return (([]<size_t I>() {
-                        return[]<size_t... Js>(std::index_sequence<Js...>) {
-                            return (check.template operator() < I, Js > () || ...);
-                        }(std::make_index_sequence<B::property_num>{});
-                    }.template operator() < Is > ()) || ...);
-                }(std::make_index_sequence<A::property_num>{});
+                constexpr auto check_pack = [has_conflict]<typename Head, typename... Tail>(auto&& self) -> bool {
+                    if constexpr ((has_conflict.template operator() < Head, Tail > () || ...))
+                        return true; 
+                    else if constexpr (sizeof...(Tail) > 0) 
+                        return self.template operator() < Tail... > (self);
+                    else
+                        return false;
+                };
+
+                return check_pack.template operator()<std::decay_t<Specs>...>(check_pack);
             }
-        }
-
-        template <typename... Args>
-        struct ConflictChecker;
-
-        template <>
-        struct ConflictChecker<> {
-            static constexpr bool value = false;
-        };
-
-        template <typename Head, typename... Tail>
-        struct ConflictChecker<Head, Tail...> {
-            static constexpr bool value = (prop_specs_conflict<Head, Tail>() || ...) || ConflictChecker<Tail...>::value;
-        };
-
-        template <typename... Specs>
-        constexpr bool check_property_conflicts() {
-            return ConflictChecker<std::decay_t<Specs>...>::value;
         }
 
     }
