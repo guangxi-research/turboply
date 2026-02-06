@@ -5,10 +5,12 @@
 
 namespace turboply {
 
-    namespace detail {
-
-        template<typename... Types>
-        struct RecordStruct {
+    template<typename... Types>
+        requires ((std::is_arithmetic_v<Types> ||
+            requires { typename Types::value_type;
+                requires std::is_arithmetic_v<typename Types::value_type>; }
+            ) && ...)
+    struct RecordTuple {
         private:
             template<typename... Ts>
             struct Storage;
@@ -54,14 +56,14 @@ namespace turboply {
             Storage<Types...> storage;
 
         public:
-            constexpr RecordStruct() = default;
+            constexpr RecordTuple() = default;
 
             template<typename... Args>
-            constexpr explicit RecordStruct(Args&&... args)
+            constexpr explicit RecordTuple(Args&&... args)
                 : storage{ std::forward<Args>(args)... } {
             }
 
-            auto operator<=>(const RecordStruct&) const = default;
+            auto operator<=>(const RecordTuple&) const = default;
 
             static constexpr std::size_t size() {
                 return sizeof...(Types);
@@ -89,26 +91,46 @@ namespace turboply {
             }
 
             template<std::size_t N>
-            friend constexpr auto& get(RecordStruct& t) {
+            friend constexpr auto& get(RecordTuple& t) {
                 return t.template get<N>();
             }
 
             template<std::size_t N>
-            friend constexpr const auto& get(const RecordStruct& t) {
+            friend constexpr const auto& get(const RecordTuple& t) {
                 return t.template get<N>();
             }
 
             template<std::size_t N>
-            friend constexpr auto&& get(RecordStruct&& t) {
+            friend constexpr auto&& get(RecordTuple&& t) {
                 return std::move(t).template get<N>();
             }
-        };
+    };
 
-        template<>
-        struct RecordStruct<> {
-            constexpr RecordStruct() = default;
-            auto operator<=>(const RecordStruct<>&) const = default;
-        };
+    template<>
+    struct RecordTuple<> {
+        constexpr RecordTuple() = default;
+        auto operator<=>(const RecordTuple<>&) const = default;
+    };
+
+    template<typename... Types>
+    struct std::tuple_size<turboply::RecordTuple<Types...>>
+        : std::integral_constant<std::size_t, sizeof...(Types)> {
+    };
+
+    template<std::size_t I, typename... Types>
+    struct std::tuple_element<I, turboply::RecordTuple<Types...>> {
+    private:
+        template<std::size_t N, typename Head, typename... Tail>
+        struct TypeAt { using type = typename TypeAt<N - 1, Tail...>::type; };
+
+        template<typename Head, typename... Tail>
+        struct TypeAt<0, Head, Tail...> { using type = Head; };
+
+    public:
+        using type = typename TypeAt<I, Types...>::type;
+    };
+
+    namespace detail {
 
         template<size_t N>
         struct fixed_string {
@@ -123,7 +145,7 @@ namespace turboply {
         struct PropertySpec {
         private:
             static_assert(RowT::size() == sizeof...(PropertyNames),
-                "PropertySpec: Property names count must match RecordStruct field count.");
+                "PropertySpec: Property names count must match RecordTuple field count.");
 
             template <typename T>
             struct column_type_traits {
@@ -254,31 +276,39 @@ namespace turboply {
             ColumnData* _column_data;
         };
 
-        template <typename T, size_t N, typename Indices = std::make_index_sequence<N>>
-        struct repeat_type;
-
-        template <typename T, size_t N, size_t... Is>
-        struct repeat_type<T, N, std::index_sequence<Is...>> {
-            template <size_t> using Alias = T;
-            using type = RecordStruct<Alias<Is>...>;
+        template <typename T>
+        concept IsPropertySpec = requires(T & t) {
+            [] <detail::fixed_string E, typename R, detail::fixed_string... Ps>
+                (const PropertySpec<E, R, Ps...>&) {
+            }(t);
         };
 
         template <typename T, size_t N>
-        using repeat_type_t = typename repeat_type<T, N>::type;
+        using repeat_type_t = typename decltype(
+            []<size_t... Is>(std::index_sequence<Is...>) {
+            return std::type_identity<RecordTuple<
+                std::remove_cvref_t<decltype(((void)Is, std::declval<T>()))>...>>{};
+        }(std::make_index_sequence<N>{}))::type;
+
     }
 
-template <detail::fixed_string ElementName, typename T, detail::fixed_string PropertyName>
-using ScalarSpec = detail::PropertySpec<ElementName, detail::RecordStruct<T>, PropertyName>;
-
 template <detail::fixed_string ElementName, typename T, detail::fixed_string... PropertyNames>
-using MultiSpec = detail::PropertySpec<ElementName, detail::repeat_type_t<T, sizeof...(PropertyNames)>, PropertyNames...>;
+    requires std::is_arithmetic_v<T>
+using UniformSpec = detail::PropertySpec<ElementName, detail::repeat_type_t<T, sizeof...(PropertyNames)>, PropertyNames...>;
+
+template <detail::fixed_string ElementName, typename T, detail::fixed_string PropertyName>
+using ScalarSpec = UniformSpec<ElementName, T, PropertyName>;
 
 template <detail::fixed_string ElementName, typename T, detail::fixed_string PropertyName, size_t Length = 0>
-using ListSpec = detail::PropertySpec<ElementName, detail::RecordStruct<std::conditional_t<Length == 0, std::vector<T>, std::array<T, Length>>>, PropertyName>;
+    requires std::is_arithmetic_v<T>
+using ListSpec = detail::PropertySpec<ElementName, RecordTuple<std::conditional_t<Length == 0, std::vector<T>, std::array<T, Length>>>, PropertyName>;
 
-using VertexSpec = detail::PropertySpec<"vertex", detail::RecordStruct<float, float, float>, "x", "y", "z">;
-using NormalSpec = detail::PropertySpec<"vertex", detail::RecordStruct<float, float, float>, "nx", "ny", "nz">;
-using ColorSpec = detail::PropertySpec<"vertex", detail::RecordStruct<uint8_t, uint8_t, uint8_t>, "red", "green", "blue">;
+template <detail::fixed_string Name, typename T, detail::fixed_string... Props>
+using CustomSpec = detail::PropertySpec<Name, T, Props...>;
+
+using VertexSpec = UniformSpec<"vertex", float, "x", "y", "z">;
+using NormalSpec = UniformSpec<"vertex", float, "nx", "ny", "nz">;
+using ColorSpec = UniformSpec<"vertex", float, "red", "green", "blue">;
 using FaceSpec = ListSpec<"face", uint32_t, "vertex_indices", 3>;
 
 //////////////////////////////////////////////////////////////////////////
@@ -328,6 +358,7 @@ using FaceSpec = ListSpec<"face", uint32_t, "vertex_indices", 3>;
     }
 
 template <typename... Specs>
+    requires (detail::IsPropertySpec<Specs> && ...)
 void bind_reader(PlyStreamReader& reader, Specs&... specs) {
     static_assert(!detail::check_property_conflicts<Specs...>(),
         "Multiple specs bind to the SAME property of the SAME element.");
@@ -423,6 +454,7 @@ void bind_reader(PlyStreamReader& reader, Specs&... specs) {
 }
 
 template <typename... Specs>
+    requires (detail::IsPropertySpec<Specs> && ...)
 void bind_writer(PlyStreamWriter& writer, const Specs&... specs) {
     static_assert(!detail::check_property_conflicts<Specs...>(),
         "Multiple specs bind to the SAME property of the SAME element.");
