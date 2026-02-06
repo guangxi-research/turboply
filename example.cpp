@@ -87,12 +87,12 @@ namespace turboply::ext {
     static constexpr int SH_DC_DIM = 3;
     static constexpr int SH_REST_DIM = 45;
 
-    using PositionSpec = MultiSpec<"vertex", float, "x", "y", "z">;
-    using ScaleSpec = MultiSpec<"vertex", float, "scale_0", "scale_1", "scale_2">;
-    using RotationSpec = MultiSpec<"vertex", float, "rot_0", "rot_1", "rot_2", "rot_3">;
+    using PositionSpec = UniformSpec<"vertex", float, "x", "y", "z">;
+    using ScaleSpec = UniformSpec<"vertex", float, "scale_0", "scale_1", "scale_2">;
+    using RotationSpec = UniformSpec<"vertex", float, "rot_0", "rot_1", "rot_2", "rot_3">;
     using OpacitySpec = ScalarSpec<"vertex", float, "opacity">;
-    using SHDCSpec = MultiSpec<"vertex", float, "f_dc_0", "f_dc_1", "f_dc_2">;
-    using SHRestSpec = MultiSpec<"vertex", float,
+    using SHDCSpec = UniformSpec<"vertex", float, "f_dc_0", "f_dc_1", "f_dc_2">;
+    using SHRestSpec = UniformSpec<"vertex", float,
         "f_rest_0", "f_rest_1", "f_rest_2", "f_rest_3", "f_rest_4",
         "f_rest_5", "f_rest_6", "f_rest_7", "f_rest_8", "f_rest_9",
         "f_rest_10", "f_rest_11", "f_rest_12", "f_rest_13", "f_rest_14",
