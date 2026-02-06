@@ -90,7 +90,7 @@ namespace turboply::ext {
     using PositionSpec = UniformSpec<"vertex", float, "x", "y", "z">;
     using ScaleSpec = UniformSpec<"vertex", float, "scale_0", "scale_1", "scale_2">;
     using RotationSpec = UniformSpec<"vertex", float, "rot_0", "rot_1", "rot_2", "rot_3">;
-    using OpacitySpec = ScalarSpec<"vertex", float, "opacity">;
+    using OpacitySpec = UniformSpec<"vertex", float, "opacity">;
     using SHDCSpec = UniformSpec<"vertex", float, "f_dc_0", "f_dc_1", "f_dc_2">;
     using SHRestSpec = UniformSpec<"vertex", float,
         "f_rest_0", "f_rest_1", "f_rest_2", "f_rest_3", "f_rest_4",
@@ -169,3 +169,4 @@ namespace turboply::ext {
     }
 
 }
+
