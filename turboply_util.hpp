@@ -308,7 +308,7 @@ using CustomSpec = detail::PropertySpec<Name, T, Props...>;
 
 using VertexSpec = UniformSpec<"vertex", float, "x", "y", "z">;
 using NormalSpec = UniformSpec<"vertex", float, "nx", "ny", "nz">;
-using ColorSpec = UniformSpec<"vertex", float, "red", "green", "blue">;
+using ColorSpec = UniformSpec<"vertex", uint8_t, "red", "green", "blue">;
 using FaceSpec = ListSpec<"face", uint32_t, "vertex_indices", 3>;
 
 //////////////////////////////////////////////////////////////////////////
@@ -522,3 +522,4 @@ void bind_writer(PlyStreamWriter& writer, const Specs&... specs) {
 }
 
 }
+
