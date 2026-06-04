@@ -10,8 +10,8 @@
  *          access to large datasets. Big-endian format is intentionally 
  *          not supported for simplicity and performance.
  * 
- * @version 1.0.4
- * @date    2026-02-07
+ * @version 1.0.6
+ * @date    2026-06-04
  *
  * -----------------------------------------------------------------------------
  * Permission is hereby granted, free of charge, to any person obtaining a copy
