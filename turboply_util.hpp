@@ -1,525 +1,543 @@
+/**
+ * SPDX-License-Identifier: MIT
+ *
+ * Copyright (c) 2026 TAO 12804985@qq.com
+ *
+ * @file    turboply.hpp
+* @brief    TurboPLY: A lightweight, high-performance PLY file I/O library.
+ *          Supports binary little-endian and ASCII formats, and provides
+ *          optional memory-mapped file I/O for zero-copy, high-throughput
+ *          access to large datasets. Big-endian format is intentionally 
+ *          not supported for simplicity and performance.
+ * 
+ * @version 1.0.6
+ * @date    2026-02-10
+ *
+ * -----------------------------------------------------------------------------
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ * -----------------------------------------------------------------------------
+ */
+
 #pragma once
 
 #include <span>
 #include <functional>
+#include <type_traits>
 
 namespace turboply {
 
+    template<typename T> 
+    concept is_record_type_compatible = std::is_arithmetic_v<T> ||
+        requires { typename T::value_type;
+        requires std::is_arithmetic_v<typename T::value_type>;
+    };
+
     template<typename... Types>
-        requires ((std::is_arithmetic_v<Types> ||
-            requires { typename Types::value_type;
-                requires std::is_arithmetic_v<typename Types::value_type>; }
-            ) && ...)
+        requires (is_record_type_compatible<Types> && ...)
     struct RecordTuple {
-        private:
-            template<typename... Ts>
-            struct Storage;
-
-            template<typename T>
-            struct Storage<T> {
-                T first;
-                auto operator<=>(const Storage&) const = default;
-            };
-
-            template<typename Head, typename Next, typename... Tail>
-            struct Storage<Head, Next, Tail...> {
-                Head first;
-                Storage<Next, Tail...> rest;
-                auto operator<=>(const Storage&) const = default;
-            };
-
-            template<std::size_t I, typename S>
-            static constexpr auto& get_impl(S& s) {
-                if constexpr (I == 0)
-                    return s.first;
-                else
-                    return get_impl<I - 1>(s.rest);
-            }
-
-            template<std::size_t I, typename S>
-            static constexpr const auto& get_impl(const S& s) {
-                if constexpr (I == 0)
-                    return s.first;
-                else
-                    return get_impl<I - 1>(s.rest);
-            }
-
-            template<std::size_t I, typename... Ts>
-            struct type_at;
-
-            template<typename Head, typename... Tail>
-            struct type_at<0, Head, Tail...> { using type = Head; };
-
-            template<std::size_t I, typename Head, typename... Tail>
-            struct type_at<I, Head, Tail...> { using type = typename type_at<I - 1, Tail...>::type; };
-
-            Storage<Types...> storage;
-
-        public:
-            constexpr RecordTuple() = default;
-
-            template<typename... Args>
-            constexpr explicit RecordTuple(Args&&... args)
-                : storage{ std::forward<Args>(args)... } {
-            }
-
-            auto operator<=>(const RecordTuple&) const = default;
-
-            static constexpr std::size_t size() {
-                return sizeof...(Types);
-            }
-
-            template<std::size_t I>
-            using field_type = typename type_at<I, Types...>::type;
-
-            template<std::size_t I>
-            constexpr auto& get()& {
-                static_assert(I < sizeof...(Types), "Index out of bounds");
-                return get_impl<I>(storage);
-            }
-
-            template<std::size_t I>
-            constexpr const auto& get() const& {
-                static_assert(I < sizeof...(Types), "Index out of bounds");
-                return get_impl<I>(storage);
-            }
-
-            template<std::size_t I>
-            constexpr auto&& get()&& {
-                static_assert(I < sizeof...(Types), "Index out of bounds");
-                return std::move(get_impl<I>(storage));
-            }
-
-            template<std::size_t N>
-            friend constexpr auto& get(RecordTuple& t) {
-                return t.template get<N>();
-            }
-
-            template<std::size_t N>
-            friend constexpr const auto& get(const RecordTuple& t) {
-                return t.template get<N>();
-            }
-
-            template<std::size_t N>
-            friend constexpr auto&& get(RecordTuple&& t) {
-                return std::move(t).template get<N>();
-            }
-    };
-
-    template<>
-    struct RecordTuple<> {
-        constexpr RecordTuple() = default;
-        auto operator<=>(const RecordTuple<>&) const = default;
-    };
-
-    template<typename... Types>
-    struct std::tuple_size<turboply::RecordTuple<Types...>>
-        : std::integral_constant<std::size_t, sizeof...(Types)> {
-    };
-
-    template<std::size_t I, typename... Types>
-    struct std::tuple_element<I, turboply::RecordTuple<Types...>> {
     private:
-        template<std::size_t N, typename Head, typename... Tail>
-        struct TypeAt { using type = typename TypeAt<N - 1, Tail...>::type; };
+        template<typename... Ts> struct Storage;
+        template<typename T> struct Storage<T> { T first; auto operator<=>(const Storage&) const = default; };
+        template<typename H, typename N, typename... T> struct Storage<H, N, T...> { H first; Storage<N, T...> rest; auto operator<=>(const Storage&) const = default; };
 
-        template<typename Head, typename... Tail>
-        struct TypeAt<0, Head, Tail...> { using type = Head; };
+        template<std::size_t I, typename S> static constexpr auto& get_impl(S& s) {
+            if constexpr (I == 0) return s.first; else return get_impl<I - 1>(s.rest);
+        }
+        template<std::size_t I, typename... Ts> struct type_at;
+        template<typename H, typename... T> struct type_at<0, H, T...> { using type = H; };
+        template<std::size_t I, typename H, typename... T> struct type_at<I, H, T...> { using type = typename type_at<I - 1, T...>::type; };
+
+        Storage<Types...> storage;
 
     public:
-        using type = typename TypeAt<I, Types...>::type;
+        constexpr RecordTuple() = default;
+
+        template<typename... Args> requires (sizeof...(Args) != 1 || !(std::is_same_v<std::decay_t<Args>, RecordTuple> && ...))
+        constexpr explicit RecordTuple(Args&&... args) : storage{ std::forward<Args>(args)... } {}
+
+        auto operator<=>(const RecordTuple&) const = default;
+        static constexpr std::size_t size() { return sizeof...(Types); }
+        template<std::size_t I> using field_type = typename type_at<I, Types...>::type;
+
+        template<std::size_t I> constexpr auto& get()& { return get_impl<I>(storage); }
+        template<std::size_t I> constexpr const auto& get() const& { return get_impl<I>(storage); }
+        template<std::size_t I> constexpr auto&& get()&& { return std::move(get_impl<I>(storage)); }
+
+        template<std::size_t N> friend constexpr auto& get(RecordTuple& t) { return t.template get<N>(); }
+        template<std::size_t N> friend constexpr const auto& get(const RecordTuple& t) { return t.template get<N>(); }
     };
+
+    template<> struct RecordTuple<> {
+        constexpr RecordTuple() = default; auto operator<=>(const RecordTuple<>&) const = default;
+    };
+
+    //////////////////////////////////////////////////////////////////////////
 
     namespace detail {
 
-        template<size_t N>
-        struct fixed_string {
+        template<size_t N> struct fixed_string {
             char data[N];
             constexpr fixed_string(const char(&str)[N]) { std::copy_n(str, N, data); }
-
             auto operator<=>(const fixed_string&) const = default;
             constexpr operator const char* () const { return data; }
         };
 
-        template <detail::fixed_string ElementName, typename RowT, detail::fixed_string... PropertyNames>
-        struct PropertySpec {
-        private:
-            static_assert(RowT::size() == sizeof...(PropertyNames),
-                "PropertySpec: Property names count must match RecordTuple field count.");
-
-            template <typename T>
-            struct column_type_traits {
-                static constexpr ScalarKind get_scalar_kind() {
-                    using U = std::decay_t<T>;
-                    if constexpr (std::is_same_v<U, float>)    return ScalarKind::FLOAT32;
-                    if constexpr (std::is_same_v<U, double>)   return ScalarKind::FLOAT64;
-                    if constexpr (std::is_same_v<U, int32_t>)  return ScalarKind::INT32;
-                    if constexpr (std::is_same_v<U, uint32_t>) return ScalarKind::UINT32;
-                    if constexpr (std::is_same_v<U, int16_t>)  return ScalarKind::INT16;
-                    if constexpr (std::is_same_v<U, uint16_t>) return ScalarKind::UINT16;
-                    if constexpr (std::is_same_v<U, uint8_t>)  return ScalarKind::UINT8;
-                    if constexpr (std::is_same_v<U, int8_t>)   return ScalarKind::INT8;
-                    if constexpr (std::is_same_v<U, char>)     return ScalarKind::INT8;
-                    return ScalarKind::UNUSED;
+        template <typename T1, typename T2>
+        struct is_row_type_compatible_trait {
+            static constexpr bool get_value() {
+                if constexpr (std::is_same_v<std::remove_cvref_t<T1>, std::remove_cvref_t<T2>>) {
+                    return true;
                 }
+                constexpr bool is_c1 = requires { typename T1::value_type; };
+                constexpr bool is_c2 = requires { typename T2::value_type; };
+                if constexpr (is_c1 && is_c2) {
+                    using V1 = std::remove_cvref_t<typename T1::value_type>;
+                    using V2 = std::remove_cvref_t<typename T2::value_type>;
+                    if constexpr (std::is_arithmetic_v<V1> && std::is_arithmetic_v<V2>) {
+                        return std::is_same_v<V1, V2>; // 内部为数值类型时强行要求类型完全一致
+                    }
+                    return is_row_type_compatible_trait<V1, V2>::value;
+                }
+                return true;
+            }
+            static constexpr bool value = get_value();
+        };
 
-                using ScalarType = T;
-                static constexpr ScalarKind value_kind = get_scalar_kind();
-                static constexpr ScalarKind list_kind = ScalarKind::UNUSED;
-            };
+        template <typename T1, typename T2> 
+        concept is_row_type_compatible = is_row_type_compatible_trait<T1, T2>::value;
 
-            template <typename T, typename Alloc>
-            struct column_type_traits<std::vector<T, Alloc>> {
-                using ScalarType = T;
-                static constexpr ScalarKind value_kind = column_type_traits<T>::get_scalar_kind();
-                static constexpr ScalarKind list_kind = ScalarKind::UINT32;
-            };
-
-            template <typename T, size_t N>
-            struct column_type_traits<std::array<T, N>> {
-                using ScalarType = T;
-                static constexpr ScalarKind value_kind = column_type_traits<T>::get_scalar_kind();
-                static constexpr ScalarKind list_kind = ScalarKind::UINT8;
-            };
-
-        public:
+        template <fixed_string ElementName, typename RowT>
+        struct PropertySpecBase {
             using RowType = RowT;
             using ColumnData = std::vector<RowType>;
             using ColumnView = std::span<RowType>;
-
             static constexpr std::string_view element_name{ ElementName };
-            static constexpr size_t property_num = sizeof...(PropertyNames);
 
-            PropertySpec(ColumnData& column_data)
-                : _column_view{ column_data }, _column_data{ &column_data } {
+            void bind_storage(ColumnData& d) {
+                this->_column_view = ColumnView(d);
+                this->_column_data = &d;
+                this->_is_writable = true;
+            }
+            void bind_storage(const ColumnData& d) {
+                _column_view = ColumnView(const_cast<RowType*>(d.data()), d.size());
+                _column_data = nullptr;
+                _is_writable = false;
+            }
+            void bind_storage(ColumnView v) {
+                _column_view = v;
+                _column_data = nullptr;
+                _is_writable = true;
+            }
+            void bind_storage(std::span<const RowType> v) {
+                _column_view = ColumnView(const_cast<RowType*>(v.data()), v.size());
+                _column_data = nullptr;
+                _is_writable = false;
             }
 
-            PropertySpec(const ColumnData& column_data)
-                : _column_view{ const_cast<RowType*>(column_data.data()), column_data.size() }, _column_data{ nullptr } {
+            template <typename U> requires (sizeof(U) == sizeof(RowType)) && is_row_type_compatible<U, RowType>
+            void bind_storage(std::vector<U>& d) {
+                bind_storage(reinterpret_cast<ColumnData&>(d));
+            }
+            template <typename U> requires (sizeof(U) == sizeof(RowType)) && is_row_type_compatible<U, RowType>
+            void bind_storage(const std::vector<U>& d) {
+                bind_storage(reinterpret_cast<const ColumnData&>(d));
+            }
+            template <typename U> requires (sizeof(U) == sizeof(RowType)) && is_row_type_compatible<U, RowType>
+            void bind_storage(std::span<U> v) {
+                bind_storage(ColumnView(reinterpret_cast<RowType*>(v.data()), v.size()));
             }
 
-            PropertySpec(ColumnView column_view)
-                : _column_view{ column_view }, _column_data{ nullptr } {
-            }
+            PropertySpecBase(ColumnData& d) { bind_storage(d); }
+            PropertySpecBase(const ColumnData& d) { bind_storage(d); }
+            PropertySpecBase(ColumnView v) { bind_storage(v); }
+            PropertySpecBase(std::span<const RowType> v) { bind_storage(v); }
 
-            PropertySpec(std::span<const RowType> column_view)
-                : _column_view{ const_cast<RowType*>(column_view.data()), column_view.size() }, _column_data{ nullptr } {
-            }
-
-            template <typename UserT>
-            PropertySpec(std::vector<UserT>& column_data) requires (sizeof(UserT) == sizeof(RowType))
-                : PropertySpec{ reinterpret_cast<ColumnData&>(column_data) } {
-            }
-
-            template <typename UserT>
-            PropertySpec(const std::vector<UserT>& column_data) requires (sizeof(UserT) == sizeof(RowType))
-                : PropertySpec{ reinterpret_cast<const ColumnData&>(column_data) } {
-            }
-
-            template <typename UserT>
-            PropertySpec(std::span<UserT> column_view) requires (sizeof(UserT) == sizeof(RowType))
-                : PropertySpec{ ColumnView(reinterpret_cast<RowType*>(column_view.data()), column_view.size()) } {
-            }
-
-            template <typename UserT>
-            PropertySpec(std::span<const UserT> column_view) requires (sizeof(UserT) == sizeof(RowType))
-                : PropertySpec{ std::span<const RowType>(reinterpret_cast<const RowType*>(column_view.data()), column_view.size()) } {
-            }
+            template <typename U> requires (sizeof(U) == sizeof(RowType)) && is_row_type_compatible<U, RowType>
+            PropertySpecBase(std::vector<U>& d) { bind_storage(d); }
+            template <typename U> requires (sizeof(U) == sizeof(RowType)) && is_row_type_compatible<U, RowType>
+            PropertySpecBase(const std::vector<U>& d) { bind_storage(d); }
+            template <typename U> requires (sizeof(U) == sizeof(RowType)) && is_row_type_compatible<U, RowType>
+            PropertySpecBase(std::span<U> v) { bind_storage(v); }
 
             ColumnView& operator()() { return _column_view; }
             const ColumnView& operator()() const { return _column_view; }
 
-            void resize(size_t n) {
-                if (_column_data) {
-                    _column_data->resize(n);
-                    _column_view = std::span<RowType>(*_column_data);
+            virtual void resize_storage(size_t n) {
+                if (this->_column_data) {
+                    this->_column_data->resize(n);
+                    refresh_view();
                 }
-                else if (_column_view.size() != n) {
+                else if (this->_column_view.size() != n)
                     throw std::runtime_error(std::format(
-                        "Ply Error: Element count mismatch. Element '{}' expects {} rows, but provided storage has {} rows."
-                        , element_name, n, _column_view.size()));
+                        "Ply Error: Element '{}' expects {} rows, but storage has {}.",
+                        element_name, n, this->_column_view.size()));
+            }
+
+            void refresh_view() const {
+                if (this->_column_data) {
+                    this->_column_view = ColumnView(*(this->_column_data));
                 }
             }
 
-            template <size_t I>
-            struct ColumnInfo {
-                using FieldType = typename RowType::template field_type<I>;
-                using Traits = column_type_traits<FieldType>;
-                using ScalarType = typename Traits::ScalarType;
+            virtual PlyElement create_element() const = 0;
+            virtual void reset_schema() {}
+            virtual bool try_bind_property(const PlyElement::Property&, std::function<void(size_t)>&, PlyStreamReader&) = 0;
+            virtual void write_row(PlyStreamWriter&, size_t) const = 0;
 
-                static constexpr auto __name = std::get<I>(std::tuple{ PropertyNames... });
-                static constexpr std::string_view property_name{ __name };
-                static constexpr ScalarKind value_kind = Traits::value_kind;
-                static constexpr ScalarKind list_kind = Traits::list_kind;
-            };
+        protected:
+            mutable ColumnView _column_view;
+            ColumnData* _column_data;
+            bool _is_writable = true;
+        };
 
-            PlyElement create() const {
-                PlyElement elem;
-                elem.name = std::string(element_name);
-                elem.count = _column_view.size();
+        template <fixed_string ElementName, typename RowT, fixed_string... PropertyNames>
+        struct FixedPropertySpec : public PropertySpecBase<ElementName, RowT> {
+            static constexpr bool is_fixed = true;
+            static constexpr size_t property_num = sizeof...(PropertyNames);
 
-                [&] <size_t... Is>(std::index_sequence<Is...>) {
-                    (elem.properties.push_back(
-                        PlyElement::Property{
-                            .name = std::string(ColumnInfo<Is>::property_name),
-                            .valueKind = ColumnInfo<Is>::value_kind,
-                            .listKind = ColumnInfo<Is>::list_kind
-                        }
-                    ), ...);
+            virtual PlyElement create_element() const override {
+                PlyElement elem{ std::string(Base::element_name), Base::_column_view.size(), {} };
+                [&]<size_t... Is>(std::index_sequence<Is...>) {
+                    (elem.properties.push_back({ std::string(Info<Is>::name), Info<Is>::Traits::value_kind, Info<Is>::Traits::list_kind }), ...);
                 }(std::make_index_sequence<property_num>{});
 
                 return elem;
             }
 
+            virtual bool try_bind_property(const PlyElement::Property& prop, std::function<void(size_t)>& read_func, PlyStreamReader& reader) override {
+                if (!this->_is_writable)
+                    throw std::runtime_error(std::format("Ply Error: Element '{}' is read-only.", Base::element_name));
+
+                bool bound = false;
+
+                [&]<size_t... Is>(std::index_sequence<Is...>) {
+                    ([&]() {
+                        if (bound) return;
+                        using Info = Info<Is>;
+                        if (prop.name == Info::name) {
+                            // Type check
+                            if (Info::Traits::list_kind != ScalarKind::UNUSED && prop.listKind == ScalarKind::UNUSED)
+                                throw std::runtime_error(std::format("Ply Error: Property '{}' expected LIST.", Info::name));
+                            if (Info::Traits::list_kind == ScalarKind::UNUSED && prop.listKind != ScalarKind::UNUSED)
+                                throw std::runtime_error(std::format("Ply Error: Property '{}' expected SCALAR.", Info::name));
+
+                            bound = true;
+                            read_func = [this, &reader, &prop](size_t row_idx) {
+                                auto& val = get<Is>(this->_column_view[row_idx]);
+                                if constexpr (Info::Traits::list_kind != ScalarKind::UNUSED) {
+                                    size_t n = ply_cast<size_t>(reader.readScalar(prop.listKind));
+                                    if constexpr (requires { val.resize(n); })
+                                        val.resize(n);
+
+                                    size_t lim = 0;
+                                    if constexpr (requires { val.size(); })
+                                        lim = std::min(n, val.size());
+
+                                    for (size_t k = 0; k < lim; ++k)
+                                        val[k] = ply_cast<typename Info::Traits::ScalarType>(reader.readScalar(prop.valueKind));
+                                    for (size_t k = lim; k < n; ++k)
+                                        reader.readScalar(prop.valueKind);
+                                }
+                                else
+                                    val = ply_cast<typename Info::Traits::ScalarType>(reader.readScalar(prop.valueKind));
+                                };
+                        }
+                        }(), ...);
+                }(std::make_index_sequence<property_num>{});
+
+                return bound;
+            }
+
+            virtual void write_row(PlyStreamWriter& writer, size_t row_idx) const override {
+                const auto& row = Base::_column_view[row_idx];
+                [&]<size_t... Is>(std::index_sequence<Is...>) {
+                    ([&]() {
+                        using Info = Info<Is>;
+                        const auto& val = get<Is>(row);
+                        if constexpr (Info::Traits::list_kind != ScalarKind::UNUSED) {
+                            size_t sz = 0;
+                            if constexpr (requires { val.size(); })
+                                sz = val.size();
+
+                            writer.writeScalar((uint32_t)sz, Info::Traits::list_kind);
+                            for (const auto& v : val)
+                                writer.writeScalar(v);
+                        }
+                        else
+                            writer.writeScalar(val);
+                        }(), ...);
+                }(std::make_index_sequence<property_num>{});
+            }
+
         private:
-            ColumnView _column_view;
-            ColumnData* _column_data;
+            using Base = PropertySpecBase<ElementName, RowT>;
+            using Base::Base;
+
+            template <typename T>
+            struct column_traits {
+                static constexpr ScalarKind kind() {
+                    if constexpr (std::is_same_v<T, float>)    return ScalarKind::FLOAT32;
+                    if constexpr (std::is_same_v<T, double>)   return ScalarKind::FLOAT64;
+                    if constexpr (std::is_same_v<T, int32_t>)  return ScalarKind::INT32;
+                    if constexpr (std::is_same_v<T, uint32_t>) return ScalarKind::UINT32;
+                    if constexpr (std::is_same_v<T, int16_t>)  return ScalarKind::INT16;
+                    if constexpr (std::is_same_v<T, uint16_t>) return ScalarKind::UINT16;
+                    if constexpr (std::is_same_v<T, uint8_t>)  return ScalarKind::UINT8;
+                    if constexpr (std::is_same_v<T, int8_t>)   return ScalarKind::INT8;
+                    if constexpr (std::is_same_v<T, char>)     return ScalarKind::INT8;
+                    return ScalarKind::UNUSED;
+                }
+                using ScalarType = T;
+                static constexpr ScalarKind value_kind = kind();
+                static constexpr ScalarKind list_kind = ScalarKind::UNUSED;
+            };
+
+            template <typename T, typename A>
+            struct column_traits<std::vector<T, A>> {
+                using ScalarType = T;
+                static constexpr ScalarKind value_kind = column_traits<T>::kind();
+                static constexpr ScalarKind list_kind = ScalarKind::UINT8/*UINT32*/; // TODO meshlab VCGlib bug no support without uint8
+            };
+
+            template <typename T, size_t N>
+            struct column_traits<std::array<T, N>> {
+                using ScalarType = T;
+                static constexpr ScalarKind value_kind = column_traits<T>::kind();
+                static constexpr ScalarKind list_kind = ScalarKind::UINT8;
+            };
+
+            template <size_t I>
+            struct Info {
+                static constexpr auto __name = std::get<I>(std::tuple{ PropertyNames... });
+                static constexpr std::string_view name{ __name };
+                using FieldT = typename RowT::template field_type<I>;
+                using Traits = column_traits<FieldT>;
+            };
         };
 
-        template <typename T>
-        concept IsPropertySpec = requires(T & t) {
-            [] <detail::fixed_string E, typename R, detail::fixed_string... Ps>
-                (const PropertySpec<E, R, Ps...>&) {
-            }(t);
+        template <fixed_string ElementName, typename ScalarT = float> requires std::is_arithmetic_v<ScalarT>
+        struct DynamicPropertySpec : public PropertySpecBase<ElementName, std::vector<ScalarT>> {
+            using Base = PropertySpecBase<ElementName, std::vector<ScalarT>>;
+            using Base::Base;
+            static constexpr bool is_fixed = false;
+
+            std::vector<PlyElement::Property> properties;
+
+            virtual PlyElement create_element() const override {
+                return PlyElement{ std::string(Base::element_name), Base::_column_view.size(), properties };
+            }
+
+            virtual void reset_schema() override {
+                properties.clear();
+            }
+
+            virtual void resize_storage(size_t n) override {
+                Base::resize_storage(n);
+                size_t col_num = properties.size();
+                for (auto& row : this->_column_view) {
+                    if (row.size() < col_num) {
+                        row.resize(col_num);
+                    }
+                }
+            }
+
+            virtual bool try_bind_property(const PlyElement::Property& prop, std::function<void(size_t)>& read_func, PlyStreamReader& reader) override {
+                if (!this->_is_writable)
+                    throw std::runtime_error(std::format("Ply Error: Element '{}' is read-only.", Base::element_name));
+                if (prop.listKind != ScalarKind::UNUSED) return false; // Dynamic list not supported yet
+
+                properties.push_back(prop);
+                size_t col_idx = properties.size() - 1;
+
+                typename Base::refresh_view();
+
+                read_func = [this, &reader, col_idx, &prop](size_t row_idx) {
+                    auto& row = this->_column_view[row_idx];
+                    row[col_idx] = ply_cast<ScalarT>(reader.readScalar(prop.valueKind));
+                    };
+
+                return true;
+            }
+
+            virtual void write_row(PlyStreamWriter& writer, size_t row_idx) const override {
+                const auto& row = Base::_column_view[row_idx];
+
+                if (row.size() < properties.size()) {
+                    throw std::runtime_error(std::format(
+                        "Ply Write Error: Row {} in element '{}' has size {} which is less than the expected properties count of {}.",
+                        row_idx, Base::element_name, row.size(), properties.size()));
+                }
+
+                for (size_t i = 0; i < properties.size(); ++i)
+                    writer.writeScalar(row[i], properties[i].valueKind);
+            }
+        };
+
+        template <typename T> 
+        concept is_property_spec = requires(T t) {
+            t.create_element();
+            { T::is_fixed } -> std::convertible_to<bool>;
+        };
+
+        template <typename T, typename Seq>
+        struct repeat_record_impl;
+
+        template <typename T, size_t... Is>
+        struct repeat_record_impl<T, std::index_sequence<Is...>> {
+            template <size_t> using type_mapper = T;
+            using type = RecordTuple<type_mapper<Is>...>;
         };
 
         template <typename T, size_t N>
-        using repeat_type_t = typename decltype(
-            []<size_t... Is>(std::index_sequence<Is...>) {
-            return std::type_identity<RecordTuple<
-                std::remove_cvref_t<decltype(((void)Is, std::declval<T>()))>...>>{};
-        }(std::make_index_sequence<N>{}))::type;
+        using repeat_record_t = typename repeat_record_impl<std::remove_cvref_t<T>, std::make_index_sequence<N>>::type;
 
     }
 
-template <detail::fixed_string ElementName, typename T, detail::fixed_string... PropertyNames>
-    requires std::is_arithmetic_v<T>
-using UniformSpec = detail::PropertySpec<ElementName, detail::repeat_type_t<T, sizeof...(PropertyNames)>, PropertyNames...>;
+    //////////////////////////////////////////////////////////////////////////
 
-template <detail::fixed_string ElementName, typename T, detail::fixed_string PropertyName>
-using ScalarSpec = UniformSpec<ElementName, T, PropertyName>;
+    template <detail::fixed_string ElementName, typename T, detail::fixed_string... PropertyNames>
+    using UniformSpec = detail::FixedPropertySpec<ElementName, detail::repeat_record_t<T, sizeof...(PropertyNames)>, PropertyNames...>;
 
-template <detail::fixed_string ElementName, typename T, detail::fixed_string PropertyName, size_t Length = 0>
-    requires std::is_arithmetic_v<T>
-using ListSpec = detail::PropertySpec<ElementName, RecordTuple<std::conditional_t<Length == 0, std::vector<T>, std::array<T, Length>>>, PropertyName>;
+    template <detail::fixed_string ElementName, typename T, detail::fixed_string PropertyName>
+    using ScalarSpec = UniformSpec<ElementName, T, PropertyName>;
 
-template <detail::fixed_string Name, typename T, detail::fixed_string... Props>
-using CustomSpec = detail::PropertySpec<Name, T, Props...>;
+    template <detail::fixed_string ElementName, typename T, detail::fixed_string PropertyName, size_t Len = 0>
+    using ListSpec = detail::FixedPropertySpec<ElementName, RecordTuple<std::conditional_t<Len == 0, std::vector<T>, std::array<T, Len>>>, PropertyName>;
 
-using VertexSpec = UniformSpec<"vertex", float, "x", "y", "z">;
-using NormalSpec = UniformSpec<"vertex", float, "nx", "ny", "nz">;
-using ColorSpec = UniformSpec<"vertex", uint8_t, "red", "green", "blue">;
-using FaceSpec = ListSpec<"face", uint32_t, "vertex_indices", 3>;
+    template <detail::fixed_string Name, typename T, detail::fixed_string... PropertyNames>
+    using CustomSpec = detail::FixedPropertySpec<Name, T, PropertyNames...>;
 
-//////////////////////////////////////////////////////////////////////////
+    template <detail::fixed_string ElementName, typename ScalarT = float>
+    using OtherSpec = detail::DynamicPropertySpec<ElementName, ScalarT>;
 
-    namespace detail {
+    using VertexSpec = UniformSpec<"vertex", float, "x", "y", "z">;
+    using NormalSpec = UniformSpec<"vertex", float, "nx", "ny", "nz">;
+    using ColorSpec  = UniformSpec<"vertex", uint8_t, "red", "green", "blue">;
+    using FaceSpec   = ListSpec<"face", uint32_t, "vertex_indices", 3>;
 
-        template <typename... Specs>
-        consteval bool check_property_conflicts() {
-            if constexpr (sizeof...(Specs) < 2) {
-                return false;
-            }
-            else {
-                constexpr auto has_conflict = []<typename A, typename B>() {
-                    if constexpr (A::element_name != B::element_name) {
-                        return false;
-                    }
-                    else {
-                        return[]<size_t... Is>(std::index_sequence<Is...>) {
-                            return (([]<size_t I>() {
-                                return[]<size_t... Js>(std::index_sequence<Js...>) {
-                                    using PropA = typename A::template ColumnInfo<I>;
-                                    return ((PropA::property_name == B::template ColumnInfo<Js>::property_name) || ...);
-                                }(std::make_index_sequence<B::property_num>{});
-                            }.template operator() < Is > ()) || ...); 
-                        }(std::make_index_sequence<A::property_num>{});
-                    }
-                };
-
-                constexpr auto check_pack = [has_conflict]<typename Head, typename... Tail>(auto&& self) -> bool {
-                    if constexpr ((has_conflict.template operator() < Head, Tail > () || ...))
-                        return true; 
-                    else if constexpr (sizeof...(Tail) > 0) 
-                        return self.template operator() < Tail... > (self);
-                    else
-                        return false;
-                };
-
-                return check_pack.template operator()<std::decay_t<Specs>...>(check_pack);
-            }
-        }
-
+    namespace meshlab {
+        using UVSpec = ListSpec<"face", float, "texcoord", 6>;
+        using TexnumberSpec = ScalarSpec<"face", int, "texnumber">;
     }
 
-template <typename... Specs>
-    requires (detail::IsPropertySpec<Specs> && ...)
-void bind_reader(PlyStreamReader& reader, Specs&... specs) {
-    static_assert(!detail::check_property_conflicts<Specs...>(),
-        "Multiple specs bind to the SAME property of the SAME element.");
+    //////////////////////////////////////////////////////////////////////////
 
-    reader.parseHeader();
+    template <typename... Specs> requires (detail::is_property_spec<Specs> && ...)
+        void bind_reader(PlyStreamReader& reader, Specs&... specs) {
+        static_assert(((Specs::is_fixed ? 0 : 1) + ...) <= 1, "Ply Read Error: Multiple dynamic specs are not allowed in a single bind_reader call.");
 
-    for (const auto& elem : reader.getElements()) {
-        if (elem.count == 0) continue;
+        (specs.reset_schema(), ...);
 
-        using ColumnReader = std::function<void(size_t)>;
-        std::vector<ColumnReader> columnReaders(elem.properties.size());
+        reader.parseHeader();
 
-        for (size_t pi = 0; pi < elem.properties.size(); ++pi) {
-            auto& prop = elem.properties[pi];
-            columnReaders[pi] = [&reader, prop](size_t) {
-                if (prop.listKind != ScalarKind::UNUSED) {
-                    auto n = ply_cast<uint32_t>(reader.readScalar(prop.listKind));
-                    for (uint32_t k = 0; k < n; ++k) 
-                        reader.readScalar(prop.valueKind);
-                }
-                else {
-                    reader.readScalar(prop.valueKind);
-                }
-            };
-        }
+        for (const auto& elem : reader.getElements()) {
+            if (elem.count == 0) continue;
 
-        ([&](auto& spec) {
-            using SpecT = std::decay_t<decltype(spec)>;
+            std::vector<std::function<void(size_t)>> reader_funcs(elem.properties.size());
+            bool spec_bound[sizeof...(Specs)] = {};
 
-            if (SpecT::element_name != elem.name) return;
-            spec.resize(elem.count);
+            for (size_t i = 0; i < elem.properties.size(); ++i) {
+                const auto& prop = elem.properties[i];
+                bool claimed = false;
 
-            [&] <size_t... Is>(std::index_sequence<Is...>) {
-                ([&]() {
-                    using PI = typename SpecT::template ColumnInfo<Is>;
+                [&] <size_t... Is>(std::index_sequence<Is...>) {
+                    auto check_specs = [&]<size_t Index, bool IsFixedPass>(auto& spec) {
+                        if (claimed) return;
+                        using T = std::decay_t<decltype(spec)>;
 
-                    auto it = std::find_if(elem.properties.begin(), elem.properties.end(),
-                        [](const auto& prop) { return prop.name == PI::property_name; });
-
-                    if (it != elem.properties.end()) {
-                        size_t pi = std::distance(elem.properties.begin(), it);
-                        const auto& prop = *it; // runtime
-
-                        columnReaders[pi] = [&reader, &spec, prop](size_t row_index) {
-                            auto& row_item = get<Is>(spec()[row_index]);
-
-                            if constexpr (PI::list_kind != ScalarKind::UNUSED) {
-                                if (prop.listKind == ScalarKind::UNUSED)
-                                    throw std::runtime_error(std::format(
-                                        "Ply Read Error: Property '{}' type mismatch. Expected LIST, but found SCALAR in file."
-                                        , PI::property_name));
-                                
-                                auto n = ply_cast<size_t>(reader.readScalar(prop.listKind));
-
-                                [&](auto& container) {
-                                    if constexpr (requires { container.resize(n); })
-                                        container.resize(n);
-
-                                    size_t capacity = 0;
-                                    if constexpr (requires { container.size(); }) 
-                                        capacity = container.size();
-
-                                    size_t limit = std::min(n, capacity); 
-                                    for (size_t k = 0; k < limit; ++k)
-                                        container[k] = ply_cast<typename PI::ScalarType>(reader.readScalar(prop.valueKind));
-                                    for (size_t k = limit; k < n; ++k)
-                                        reader.readScalar(prop.valueKind); // 丢弃
-                                }(row_item);
+                        if constexpr (T::is_fixed == IsFixedPass) {
+                            if (spec.element_name == elem.name) {
+                                if (spec.try_bind_property(prop, reader_funcs[i], reader)) {
+                                    claimed = true;
+                                    spec_bound[Index] = true;
+                                }
                             }
-                            else {
-                                if (prop.listKind != ScalarKind::UNUSED)
-                                    throw std::runtime_error(std::format(
-                                        "Ply Read Error: Property '{}' type mismatch. Expected SCALAR, but found LIST in file."
-                                        , PI::property_name));
+                        }
+                    };
 
-                                row_item = ply_cast<typename PI::ScalarType>(reader.readScalar(prop.valueKind));
-                            }
+                    (check_specs.template operator() < Is, true > (specs), ...);
+                    (check_specs.template operator() < Is, false > (specs), ...);
+                }(std::make_index_sequence<sizeof...(Specs)>{});
+
+                if (!claimed) {
+                    reader_funcs[i] = [&reader, prop](size_t) {
+                        if (prop.listKind != ScalarKind::UNUSED) {
+                            auto n = ply_cast<uint32_t>(reader.readScalar(prop.listKind));
+                            for (uint32_t k = 0; k < n; ++k)
+                                reader.readScalar(prop.valueKind);
+                        }
+                        else
+                            reader.readScalar(prop.valueKind);
                         };
-                    }
-                    else {
-                        throw std::runtime_error(std::format(
-                            "Ply Read Error: Element '{}' is missing required property '{}'."
-                            , elem.name, PI::property_name));
-                    }
-                }(), ...);
-            }(std::make_index_sequence<SpecT::property_num>{});
-         }(specs), ...); 
+                }
+            }
 
-        for (size_t ri = 0; ri < elem.count; ++ri) {
-            for (auto& rd : columnReaders) rd(ri);
+            [&]<size_t... Is>(std::index_sequence<Is...>) {
+                ([&]() {
+                    if (spec_bound[Is]) {
+                        auto& spec = std::get<Is>(std::forward_as_tuple(specs...));
+                        spec.resize_storage(elem.count);
+                    }
+                    }(), ...);
+            }(std::make_index_sequence<sizeof...(Specs)>{});
+
+            for (size_t ri = 0; ri < elem.count; ++ri)
+                for (auto& fn : reader_funcs) fn(ri);
         }
     }
-}
 
-template <typename... Specs>
-    requires (detail::IsPropertySpec<Specs> && ...)
-void bind_writer(PlyStreamWriter& writer, const Specs&... specs) {
-    static_assert(!detail::check_property_conflicts<Specs...>(),
-        "Multiple specs bind to the SAME property of the SAME element.");
+    template <typename... Specs> requires (detail::is_property_spec<Specs> && ...)
+        void bind_writer(PlyStreamWriter& writer, const Specs&... specs) {
+        std::vector<PlyElement> merged_elements;
 
-    std::vector<PlyElement> unique_elements;
+        auto get_element = [&](const std::string& name, size_t count) -> PlyElement& {
+            for (auto& e : merged_elements)
+                if (e.name == name)
+                    return e;
+            merged_elements.push_back({ name, count, {} });
+            return merged_elements.back();
+            };
 
-    ([&]() {
-        PlyElement new_elem = specs.create();
-
-        auto it = std::find_if(unique_elements.begin(), unique_elements.end(),
-            [&](const auto& elem) { return elem.name == new_elem.name; });
-
-        if (it != unique_elements.end()) {
-            if (it->count != new_elem.count)
-                throw std::runtime_error(std::format(
-                    "Ply Write Error: Element count mismatch for '{}'. All PropertySpecs for the same element must have the same size."
-                    , new_elem.name));
-
-            it->properties.insert(it->properties.end(),
-                std::make_move_iterator(new_elem.properties.begin()),
-                std::make_move_iterator(new_elem.properties.end()));
-        }
-        else {
-            unique_elements.push_back(std::move(new_elem));
-        }
-        }(), ...);
-
-    for (const auto& elem : unique_elements)
-        writer.addElement(std::move(elem));
-
-    writer.writeHeader();
-
-    for (const auto& elem : unique_elements) {
-        for (size_t ri = 0; ri < elem.count; ++ri) {
-
-            ([&]() {
-                using SpecT = std::decay_t<decltype(specs)>;
-                if (SpecT::element_name == elem.name) {
-                    const auto& row_view = specs()[ri];
-
-                    [&] <size_t... Is>(std::index_sequence<Is...>) {
-                        ([&]() {
-                            using PI = typename SpecT::template ColumnInfo<Is>;
-                            const auto& row_item = get<Is>(row_view);
-
-                            if constexpr (PI::list_kind != ScalarKind::UNUSED) {
-                                [&](auto& container) {
-                                    size_t c_size = 0;
-                                    if constexpr (requires { container.size(); })
-                                        c_size = container.size(); 
-
-                                    writer.writeScalar(static_cast<uint32_t>(c_size), PI::list_kind);
-                                    for (const auto& v : container) 
-                                        writer.writeScalar(v/*, PI::value_kind*/);
-                                }(row_item);
-                            }
-                            else {
-                                writer.writeScalar(row_item/*, PI::value_kind*/);
-                            }
-                        }(), ...);
-                    }(std::make_index_sequence<SpecT::property_num>{});
-                }
+        ([&]() {
+            specs.refresh_view(); // 刷新视图
+            PlyElement elem = specs.create_element();
+            PlyElement& target = get_element(elem.name, elem.count);
+            if (target.count != elem.count)
+                throw std::runtime_error("Ply Write: Count mismatch for element " + elem.name);
+            target.properties.insert(target.properties.end(), elem.properties.begin(), elem.properties.end());
             }(), ...);
 
-            writer.writeLineEnd();
+        for (const auto& e : merged_elements) writer.addElement(e);
+        writer.writeHeader();
+
+        for (const auto& elem : merged_elements) {
+            for (size_t ri = 0; ri < elem.count; ++ri) {
+                ([&]() { if (specs.element_name == elem.name) specs.write_row(writer, ri); }(), ...);
+                writer.writeLineEnd();
+            }
         }
+        writer.flush();
     }
 
-    writer.flush();
 }
 
-}
-
+template<typename... Ts> struct std::tuple_size<turboply::RecordTuple<Ts...>> : std::integral_constant<size_t, sizeof...(Ts)> {};
+template<size_t I, typename... Ts> struct std::tuple_element<I, turboply::RecordTuple<Ts...>> {
+    using type = typename turboply::RecordTuple<Ts...>::template field_type<I>;
+};
