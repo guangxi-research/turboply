@@ -11,7 +11,7 @@
  *          not supported for simplicity and performance.
  * 
  * @version 1.0.6
- * @date    2026-02-10
+ * @date    2026-06-04
  *
  * -----------------------------------------------------------------------------
  * Permission is hereby granted, free of charge, to any person obtaining a copy
